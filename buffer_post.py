@@ -24,7 +24,7 @@ import urllib.request
 
 ENDPOINT = "https://api.buffer.com"
 ENV_FILE = "/root/.hermes/.env"
-LIMITS = {"threads": 500, "bluesky": 300, "x": 280, "linkedin": 3000}
+LIMITS = {"threads": 500, "bluesky": 300, "x": 280, "linkedin": 3000, "instagram": 2200}
 
 # В Buffer сервис X называется "twitter" - в CLI оставляем привычное "x".
 SERVICE_ALIAS = {"x": "twitter"}
@@ -199,6 +199,11 @@ def cmd_add(args: argparse.Namespace) -> None:
         "mode": "customScheduled" if args.due_at else "addToQueue",
         "source": "hermes-cron",
     }
+    if args.service == "instagram":
+        if not args.image_url:
+            sys.exit("instagram требует --image-url (публичный URL картинки)")
+        payload["assets"] = [{"image": {"url": args.image_url}}]
+        payload["metadata"] = {"instagram": {"type": "post", "shouldShareToFeed": True}}
     if args.due_at:
         payload["dueAt"] = args.due_at
     if args.dry_run:
@@ -250,6 +255,7 @@ def main() -> None:
     p_a.add_argument("--dry-run", action="store_true")
     p_a.add_argument("--allow-no-link", action="store_true")
     p_a.add_argument("--channel-id", help="если каналов с этим service несколько")
+    p_a.add_argument("--image-url", help="обязательно для instagram: публичный URL картинки")
     add_account(p_a)
     p_a.set_defaults(func=cmd_add)
 
