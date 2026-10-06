@@ -24,7 +24,7 @@ import urllib.request
 
 ENDPOINT = "https://api.buffer.com"
 ENV_FILE = "/root/.hermes/.env"
-LIMITS = {"threads": 500, "bluesky": 300, "x": 280, "linkedin": 3000, "instagram": 2200}
+LIMITS = {"threads": 500, "bluesky": 300, "x": 280, "linkedin": 3000, "instagram": 2200, "pinterest": 500}
 
 # В Buffer сервис X называется "twitter" - в CLI оставляем привычное "x".
 SERVICE_ALIAS = {"x": "twitter"}
@@ -41,6 +41,15 @@ mutation CreatePost($input: CreatePostInput!) {
 CHANNELS = """
 query Channels($org: OrganizationId!) {
   channels(input: { organizationId: $org }) { id name service isDisconnected }
+}
+"""
+
+PINTEREST_BOARDS = """
+query PinBoards($org: OrganizationId!) {
+  channels(input: { organizationId: $org }) {
+    id service
+    metadata { ... on PinterestMetadata { boards { serviceId name } } }
+  }
 }
 """
 
@@ -204,6 +213,25 @@ def cmd_add(args: argparse.Namespace) -> None:
             sys.exit("instagram требует --image-url (публичный URL картинки)")
         payload["assets"] = [{"image": {"url": args.image_url}}]
         payload["metadata"] = {"instagram": {"type": "post", "shouldShareToFeed": True}}
+    if args.service == "pinterest":
+        if not args.image_url:
+            sys.exit("pinterest требует --image-url (публичный URL картинки)")
+        payload["assets"] = [{"image": {"url": args.image_url}}]
+        # title берём из первой строки текста; борд — первый в канале
+        title = text.splitlines()[0].strip()[:100] if text else ""
+        board_id = args.pin_board_id
+        if not board_id:
+            data = gql(PINTEREST_BOARDS, {"org": org_id(account)}, account=account)
+            for ch in data["channels"]:
+                if ch["service"] == "pinterest":
+                    boards = (ch.get("metadata") or {}).get("boards") or []
+                    if not boards:
+                        sys.exit("У pinterest-канала нет ни одного борда — создай его в Buffer UI")
+                    board_id = boards[0]["serviceId"]
+                    break
+            else:
+                sys.exit("pinterest-канал не найден в аккаунте")
+        payload["metadata"] = {"pinterest": {"boardServiceId": board_id, "title": title, "url": "https://surl.li/mmlnjb"}}
     if args.due_at:
         payload["dueAt"] = args.due_at
     if args.dry_run:
@@ -255,7 +283,8 @@ def main() -> None:
     p_a.add_argument("--dry-run", action="store_true")
     p_a.add_argument("--allow-no-link", action="store_true")
     p_a.add_argument("--channel-id", help="если каналов с этим service несколько")
-    p_a.add_argument("--image-url", help="обязательно для instagram: публичный URL картинки")
+    p_a.add_argument("--image-url", help="обязательно для instagram/pinterest: публичный URL картинки")
+    p_a.add_argument("--pin-board-id", help="pinterest: serviceId борда (по умолчанию — первый борд канала)")
     add_account(p_a)
     p_a.set_defaults(func=cmd_add)
 
