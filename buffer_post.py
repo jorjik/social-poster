@@ -24,6 +24,7 @@ import urllib.request
 
 ENDPOINT = "https://api.buffer.com"
 ENV_FILE = "/root/.hermes/.env"
+TRACK_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ig_media_track.json")
 LIMITS = {"threads": 500, "bluesky": 300, "x": 280, "linkedin": 3000, "instagram": 2200, "pinterest": 500}
 
 # В Buffer сервис X называется "twitter" - в CLI оставляем привычное "x".
@@ -90,6 +91,52 @@ def api_key(account: int = 1) -> str:
     except FileNotFoundError:
         pass
     sys.exit(f"{var} не найден ни в окружении, ни в {ENV_FILE}")
+
+
+_ENV_CACHE: dict = {}
+
+
+def env_value(var: str) -> str:
+    """Значение из окружения или ENV_FILE (кэшируется в модуле)."""
+    if not _ENV_CACHE:
+        try:
+            with open(ENV_FILE, encoding="utf-8") as fh:
+                for line in fh:
+                    if "=" in line and not line.lstrip().startswith("#"):
+                        k, v = line.split("=", 1)
+                        _ENV_CACHE[k.strip()] = v.strip().strip("'\"")
+        except FileNotFoundError:
+            pass
+    return os.environ.get(var, "") or _ENV_CACHE.get(var, "")
+
+
+def delete_wp_media(url: str, wp_user: str, wp_pw: str) -> bool:
+    """Удаляет медиафайл из WP по его публичному URL. True = удалён."""
+    import base64
+    import subprocess
+    auth = base64.b64encode(f"{wp_user}:{wp_pw}".encode()).decode()
+    slug = url.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    # найти id медиа по slug
+    r2 = subprocess.run(
+        ["curl", "-s", "-H", f"Authorization: Basic {auth}",
+         "-G", "--data-urlencode", f"slug={slug}",
+         "https://master-jenya.com/wp-json/wp/v2/media"],
+        capture_output=True, text=True, timeout=60,
+    )
+    try:
+        items = json.loads(r2.stdout)
+        if items and items[0].get("id"):
+            mid = items[0]["id"]
+            r3 = subprocess.run(
+                ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "-X", "DELETE",
+                 f"https://master-jenya.com/wp-json/wp/v2/media/{mid}?force=true",
+                 "-H", f"Authorization: Basic {auth}"],
+                capture_output=True, text=True, timeout=60,
+            )
+            return r3.stdout.strip() == "200"
+    except (json.JSONDecodeError, KeyError):
+        pass
+    return False
 
 
 def gql(query: str, variables: dict | None = None, account: int = 1) -> dict:
@@ -247,6 +294,52 @@ def cmd_add(args: argparse.Namespace) -> None:
     post = result["post"]
     print(f"В очереди: id={post['id']} dueAt={post.get('dueAt') or 'по расписанию канала'} ({size} символов)")
 
+    # трекинг медиа: IG/Pinterest-картинки на master-jenya.com удалим после публикации
+    if args.service in ("instagram", "pinterest") and args.image_url \
+            and "master-jenya.com/wp-content/uploads" in args.image_url:
+        track = {}
+        try:
+            with open(TRACK_FILE, encoding="utf-8") as fh:
+                track = json.load(fh)
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+        track[post["id"]] = {"url": args.image_url, "service": args.service, "account": account}
+        with open(TRACK_FILE, "w", encoding="utf-8") as fh:
+            json.dump(track, fh, ensure_ascii=False, indent=2)
+
+
+def cmd_cleanup_ig(args: argparse.Namespace) -> None:
+    """Удаляет IG/Pinterest-картинки из WP, чьи посты уже опубликованы в Buffer."""
+    try:
+        with open(TRACK_FILE, encoding="utf-8") as fh:
+            track = json.load(fh)
+    except (FileNotFoundError, json.JSONDecodeError):
+        print("Трек-файла нет — нечего чистить")
+        return
+
+    # статусы постов по аккаунтам
+    statuses = {}
+    for acc in sorted({v["account"] for v in track.values()}):
+        edges = gql(POSTS, {"org": org_id(acc), "first": 50}, account=acc)["posts"]["edges"]
+        statuses.update({e["node"]["id"]: e["node"]["status"] for e in edges})
+
+    wp_user = env_value("WP_USER")
+    wp_pw = env_value("WP_APP_PASSWORD")
+    if not wp_user or not wp_pw:
+        sys.exit("WP_USER/WP_APP_PASSWORD не найдены")
+
+    kept = {}
+    for post_id, meta in track.items():
+        status = statuses.get(post_id)
+        if status == "sent":
+            removed = delete_wp_media(meta["url"], wp_user, wp_pw)
+            print(f"{post_id} ({meta['service']}): {status} — медиа {'удалено' if removed else 'пропущено'}")
+        else:
+            kept[post_id] = meta
+            print(f"{post_id} ({meta['service']}): {status or 'не найден'} — оставляем")
+    with open(TRACK_FILE, "w", encoding="utf-8") as fh:
+        json.dump(kept, fh, ensure_ascii=False, indent=2)
+
 
 def cmd_delete(args: argparse.Namespace) -> None:
     """Удаляет посты из очереди по id. Опубликованные Buffer не отдаёт."""
@@ -292,6 +385,9 @@ def main() -> None:
     p_d.add_argument("post_ids", nargs="+", help="id постов из вывода queue")
     add_account(p_d)
     p_d.set_defaults(func=cmd_delete)
+
+    p_c = sub.add_parser("cleanup-ig", help="удалить IG/Pinterest-картинки из WP, чьи посты уже опубликованы")
+    p_c.set_defaults(func=cmd_cleanup_ig)
 
     args = parser.parse_args()
     args.func(args)
