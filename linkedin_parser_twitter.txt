@@ -1,0 +1,1 @@
+LinkedIn Parser: 50 контактов за 10 минут вместо часа вручную. Запрос → Google CSE → CSV (имя, должность, email). Без логина в LinkedIn. Скачать: https://ko-fi.com/s/e7700578db
