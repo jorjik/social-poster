@@ -236,10 +236,6 @@ def cmd_add(args: argparse.Namespace) -> None:
 
     limit = LIMITS.get(args.service)
     size = graphemes(text)
-    if args.service == "threads":
-        size_bytes = len(text.encode("utf-8"))
-        if size_bytes > 500:
-            sys.exit(f"threads: {size_bytes} UTF-8 байт при лимите 500 — сократи текст")
     if limit and size > limit:
         hint = " (у X Premium лимит выше, но пост всё равно видно только в первых 280 символах)" if args.service == "x" else ""
         sys.exit(f"{args.service}: {size} символов при лимите {limit} — сократи текст{hint}")
