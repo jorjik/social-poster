@@ -344,7 +344,7 @@ def cmd_cleanup_ig(args: argparse.Namespace) -> None:
 def cmd_delete(args: argparse.Namespace) -> None:
     """Удаляет посты из очереди по id. Опубликованные Buffer не отдаёт."""
     for post_id in args.post_ids:
-        result = gql(DELETE_POST, {"input": {"id": post_id}}, account=args.account)["deletePost"]
+        result = gql(DELETE_POST, {"input": {"id": post_id}}, account=args.account or 1)["deletePost"]
         if "id" in result:
             print(f"Удалён: id={result['id']}")
         else:
