@@ -244,7 +244,7 @@ def cmd_add(args: argparse.Namespace) -> None:
         hint = " (у X Premium лимит выше, но пост всё равно видно только в первых 280 символах)" if args.service == "x" else ""
         sys.exit(f"{args.service}: {size} символов при лимите {limit} — сократи текст{hint}")
     if not args.allow_no_link:
-        required_links = ["t.me/SmartFavoriteBot", "evgeniy.in.ua", "master-jenya"]
+        required_links = ["t.me/SmartFavoriteBot", "jorjik.github.io/smart-favorite-landing", "evgeniy.in.ua", "master-jenya"]
         if not any(l in text for l in required_links):
             sys.exit("В тексте нет ссылки на продвигаемый ресурс (обойти: --allow-no-link)")
 
